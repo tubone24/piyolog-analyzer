@@ -9,6 +9,8 @@
 
 ぴよログアプリのデータを自動解析し、Claude AIで予測・アドバイスを生成してSlackに通知するGoogle Apps Scriptです。
 
+![demo](./docs/images/demo.png)
+
 ## ✨ 特徴
 
 🤖 **AI予測機能**
