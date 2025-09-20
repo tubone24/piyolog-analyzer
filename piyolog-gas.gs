@@ -258,6 +258,94 @@ function setupEnvironmentInEditor() {
 }
 
 // ==========================================
+// スプレッドシートID確認・設定ヘルパー
+// ==========================================
+function checkAndSetSpreadsheetId() {
+  var env = EnvironmentConfig.getInstance();
+  var currentId = env.get('SPREADSHEET_ID');
+
+  console.log('=== スプレッドシートID確認 ===');
+
+  if (currentId) {
+    console.log('現在設定されているID: ' + currentId);
+
+    // IDの妥当性をチェック
+    try {
+      var ss = SpreadsheetApp.openById(currentId);
+      console.log('✓ スプレッドシート名: ' + ss.getName());
+      console.log('✓ URL: https://docs.google.com/spreadsheets/d/' + currentId);
+      console.log('✓ アクセス可能です');
+    } catch (e) {
+      console.error('✗ このIDではスプレッドシートにアクセスできません');
+      console.error('エラー: ' + e.toString());
+      console.log('');
+      console.log('以下を確認してください：');
+      console.log('1. IDが正しいか');
+      console.log('2. スプレッドシートが存在するか');
+      console.log('3. このGASプロジェクトからアクセス権限があるか');
+    }
+  } else {
+    console.log('スプレッドシートIDが設定されていません');
+  }
+
+  console.log('');
+  console.log('新しいIDを設定する場合は以下を実行：');
+  console.log('setSpreadsheetId("新しいID")');
+  console.log('');
+  console.log('現在のスプレッドシートを使用する場合は以下を実行：');
+  console.log('useActiveSpreadsheet()');
+
+  return currentId;
+}
+
+function setSpreadsheetId(newId) {
+  if (!newId) {
+    console.error('IDを指定してください');
+    return false;
+  }
+
+  // IDの妥当性をチェック
+  try {
+    var ss = SpreadsheetApp.openById(newId);
+    console.log('スプレッドシート確認: ' + ss.getName());
+
+    var env = EnvironmentConfig.getInstance();
+    env.set('SPREADSHEET_ID', newId);
+
+    console.log('✓ スプレッドシートIDを設定しました: ' + newId);
+    console.log('URL: https://docs.google.com/spreadsheets/d/' + newId);
+    return true;
+  } catch (e) {
+    console.error('✗ 無効なスプレッドシートIDです');
+    console.error('エラー: ' + e.toString());
+    return false;
+  }
+}
+
+function useActiveSpreadsheet() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      console.error('アクティブなスプレッドシートがありません');
+      console.log('スプレッドシートから「拡張機能」→「Apps Script」で開いてください');
+      return false;
+    }
+
+    var id = ss.getId();
+    var env = EnvironmentConfig.getInstance();
+    env.set('SPREADSHEET_ID', id);
+
+    console.log('✓ 現在のスプレッドシートを使用します');
+    console.log('名前: ' + ss.getName());
+    console.log('ID: ' + id);
+    return true;
+  } catch (e) {
+    console.error('エラー: ' + e.toString());
+    return false;
+  }
+}
+
+// ==========================================
 // 設定画面HTML
 // ==========================================
 function getSetupHtml() {
@@ -733,24 +821,28 @@ function parsePiyologText(text, emailDate) {
       milk: { count: 0, total: 0, max: 0 },
       breastMilk: { left: 0, right: 0 },
       sleep: { total: 0, sessions: [] },
-      diaper: { pee: 0, poop: 0 }
+      diaper: { pee: 0, poop: 0 },
+      weight: null,
+      temperature: null
     }
   };
-  
+
   var currentDate = null;
-  
+
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim();
-    
-    if (line.match(/^\d{4}\/\d{1,2}\/\d{1,2}/)) {
-      var dateMatch = line.match(/^(\d{4}\/\d{1,2}\/\d{1,2})/);
+
+    // 日付行（【ぴよログ】2025/9/20(土)）
+    if (line.match(/【ぴよログ】\d{4}\/\d{1,2}\/\d{1,2}/)) {
+      var dateMatch = line.match(/(\d{4}\/\d{1,2}\/\d{1,2})/);
       if (dateMatch) {
         currentDate = dateMatch[1];
         data.date = currentDate;
       }
     }
     
-    if (line.indexOf('歳') !== -1 && line.indexOf('か月') !== -1) {
+    // 赤ちゃん情報行（あかちゃん (0か月3日)）
+    if (line.match(/^.+\s+\(.+か月.+\)$/)) {
       var nameMatch = line.match(/^(.+?)\s+\(/);
       if (nameMatch) {
         data.babyName = nameMatch[1];
@@ -781,7 +873,43 @@ function parsePiyologText(text, emailDate) {
           data.summary.milk.max = Math.max(data.summary.milk.max, amount);
         }
       }
-      
+
+      // 母乳の処理
+      if (event.indexOf('母乳') !== -1) {
+        var leftMatch = event.match(/左(\d+)分/);
+        var rightMatch = event.match(/右(\d+)分/);
+        if (leftMatch) {
+          data.summary.breastMilk.left += parseInt(leftMatch[1]);
+        }
+        if (rightMatch) {
+          data.summary.breastMilk.right += parseInt(rightMatch[1]);
+        }
+      }
+
+      // 体重の処理
+      if (event.indexOf('体重') !== -1) {
+        var weightMatch = event.match(/(\d+\.?\d*)kg/);
+        if (weightMatch) {
+          data.summary.weight = parseFloat(weightMatch[1]);
+        }
+      }
+
+      // 体温の処理
+      if (event.indexOf('体温') !== -1) {
+        var tempMatch = event.match(/(\d+\.?\d*)°C/);
+        if (tempMatch) {
+          data.summary.temperature = parseFloat(tempMatch[1]);
+        }
+      }
+
+      // おしっこ・うんちの処理
+      if (event.indexOf('おしっこ') !== -1) {
+        data.summary.diaper.pee++;
+      }
+      if (event.indexOf('うんち') !== -1) {
+        data.summary.diaper.poop++;
+      }
+
       if (event.indexOf('寝る') !== -1) {
         data.summary.sleep.sessions.push({ start: time, end: null });
       }
@@ -797,11 +925,28 @@ function parsePiyologText(text, emailDate) {
       }
     }
     
+    // 合計行の処理
     if (line.indexOf('母乳合計') !== -1) {
+      // イベントで既に集計しているが、合計行でも確認
       var leftMatch = line.match(/左\s*(\d+)分/);
       var rightMatch = line.match(/右\s*(\d+)分/);
       if (leftMatch) data.summary.breastMilk.left = parseInt(leftMatch[1]);
       if (rightMatch) data.summary.breastMilk.right = parseInt(rightMatch[1]);
+    }
+
+    if (line.indexOf('ミルク合計') !== -1) {
+      var countMatch = line.match(/(\d+)回/);
+      var totalMatch = line.match(/(\d+)ml/);
+      if (countMatch && totalMatch) {
+        // 既に集計済みだが、合計行でも確認
+        var count = parseInt(countMatch[1]);
+        var total = parseInt(totalMatch[1]);
+        // 差異がある場合は合計行を信頼
+        if (data.summary.milk.count !== count || data.summary.milk.total !== total) {
+          data.summary.milk.count = count;
+          data.summary.milk.total = total;
+        }
+      }
     }
     
     if (line.indexOf('睡眠合計') !== -1) {
@@ -815,7 +960,7 @@ function parsePiyologText(text, emailDate) {
       var peeMatch = line.match(/(\d+)回/);
       if (peeMatch) data.summary.diaper.pee = parseInt(peeMatch[1]);
     }
-    
+
     if (line.indexOf('うんち合計') !== -1) {
       var poopMatch = line.match(/(\d+)回/);
       if (poopMatch) data.summary.diaper.poop = parseInt(poopMatch[1]);
@@ -831,6 +976,7 @@ function categorizeEvent(event) {
   if (event.indexOf('おしっこ') !== -1 || event.indexOf('うんち') !== -1) return 'diaper';
   if (event.indexOf('お風呂') !== -1 || event.indexOf('沐浴') !== -1) return 'bath';
   if (event.indexOf('体温') !== -1) return 'temperature';
+  if (event.indexOf('体重') !== -1) return 'weight';
   return 'other';
 }
 

@@ -119,24 +119,44 @@ function logExecution(spreadsheetId, logData) {
 // ==========================================
 function generateCharts(spreadsheetId, data) {
   var charts = [];
-  
+
   try {
     // スプレッドシートIDの検証
     if (!spreadsheetId || spreadsheetId.trim() === '') {
       console.warn('スプレッドシートIDが設定されていません。グラフ生成をスキップします。');
       return charts;
     }
-    
+
     console.log('スプレッドシートにアクセス中... ID: ' + spreadsheetId);
-    var ss = SpreadsheetApp.openById(spreadsheetId);
-    
+
+    var ss;
+    try {
+      ss = SpreadsheetApp.openById(spreadsheetId);
+    } catch (openError) {
+      console.error('スプレッドシートを開けません。新しいスプレッドシートを作成するか、IDを確認してください。');
+      console.error('エラー詳細:', openError.toString());
+
+      // 現在のスプレッドシートを使用してみる
+      try {
+        ss = SpreadsheetApp.getActiveSpreadsheet();
+        if (!ss) {
+          console.error('アクティブなスプレッドシートがありません。');
+          return charts;
+        }
+        console.log('現在のスプレッドシートを使用します。');
+      } catch (activeError) {
+        console.error('スプレッドシートにアクセスできません。グラフ生成をスキップします。');
+        return charts;
+      }
+    }
+
     // アクセス権限の確認
     try {
       var name = ss.getName();
       console.log('スプレッドシート名: ' + name);
     } catch (accessError) {
       console.error('スプレッドシートへのアクセス権限がありません:', accessError);
-      throw new Error('スプレッドシートID: ' + spreadsheetId + ' にアクセスできません。IDが正しいか、共有設定を確認してください。');
+      return charts;
     }
     
     var chartSheet = ss.getSheetByName('グラフ') || ss.insertSheet('グラフ');
@@ -620,17 +640,88 @@ function testGmailConnection(query) {
   }
 }
 
+// ==========================================
+// テスト用：sample.txtのパースをテスト
+// ==========================================
+function testParseSampleText() {
+  // sample.txtの内容をコピー
+  var sampleText = '【ぴよログ】2025/9/20(土)\n' +
+    'あかちゃん (0か月3日)\n' +
+    '\n' +
+    '07:50   母乳 左10分 ▶ 右10分 \n' +
+    '08:15   ミルク 40ml \n' +
+    '11:25   母乳 左15分 ◀ 右10分 \n' +
+    '11:50   ミルク 10ml \n' +
+    '13:00   母乳 右15分 \n' +
+    '15:31   おしっこ \n' +
+    '15:35   母乳 左9分 ▶ 右9分 \n' +
+    '15:40   うんち \n' +
+    '17:00   おしっこ \n' +
+    '17:10   体重 3.32kg \n' +
+    '17:10   母乳 左8分 ◀ 右9分 \n' +
+    '17:30   ミルク 20ml \n' +
+    '17:55   体温 37.0°C \n' +
+    '18:00   母乳 左8分 / 右5分 \n' +
+    '18:20   おしっこ \n' +
+    '\n' +
+    '母乳合計 左 50分 / 右 58分\n' +
+    'ミルク合計 3回 70ml\n' +
+    '睡眠合計 0時間0分\n' +
+    'おしっこ合計 3回\n' +
+    'うんち合計 1回\n';
+
+  var result = parsePiyologText(sampleText, new Date());
+
+  console.log('=== パーステスト結果 ===');
+  console.log('日付:', result.date);
+  console.log('赤ちゃん名:', result.babyName);
+  console.log('月齢:', result.age);
+  console.log('イベント数:', result.events.length);
+  console.log('母乳合計: 左', result.summary.breastMilk.left, '分 / 右', result.summary.breastMilk.right, '分');
+  console.log('ミルク: 合計', result.summary.milk.total, 'ml (', result.summary.milk.count, '回)');
+  console.log('おしっこ:', result.summary.diaper.pee, '回');
+  console.log('うんち:', result.summary.diaper.poop, '回');
+  console.log('体重:', result.summary.weight, 'kg');
+  console.log('体温:', result.summary.temperature, '°C');
+  console.log('========================');
+
+  // 検証
+  var success = true;
+  if (result.date !== '2025/9/20') {
+    console.error('日付のパースに失敗:', result.date);
+    success = false;
+  }
+  if (result.babyName !== 'あかちゃん') {
+    console.error('赤ちゃん名のパースに失敗:', result.babyName);
+    success = false;
+  }
+  if (result.summary.milk.total !== 70) {
+    console.error('ミルク合計のパースに失敗:', result.summary.milk.total);
+    success = false;
+  }
+  if (result.summary.breastMilk.left !== 50) {
+    console.error('母乳(左)のパースに失敗:', result.summary.breastMilk.left);
+    success = false;
+  }
+  if (result.summary.diaper.pee !== 3) {
+    console.error('おしっこ回数のパースに失敗:', result.summary.diaper.pee);
+    success = false;
+  }
+
+  return success ? 'テスト成功！' : 'テスト失敗。上記のエラーを確認してください。';
+}
+
 function testSystemWithSampleData() {
   var env = EnvironmentConfig.getInstance();
   var validation = env.validateRequired();
-  
+
   if (!validation.valid) {
     return {
       success: false,
       message: '設定が完了していません。基本設定タブで必須項目を入力してください。'
     };
   }
-  
+
   try {
     var config = env.getConfig();
     
